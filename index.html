@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HomeStock | 우리집 재고관리</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div>
+          <p class="brand">HomeStock</p>
+          <p class="brand-sub">Proactive Order</p>
+        </div>
+
+        <nav class="menu">
+          <a class="menu-item active" data-view-btn="dashboard" href="#">대시보드</a>
+          <a class="menu-item" data-view-btn="inventory" href="#">재고 관리</a>
+          <a class="menu-item" data-view-btn="shopping" href="#">장보기 리스트</a>
+          <a class="menu-item" data-view-btn="report" href="#">소비 리포트</a>
+          <a class="menu-item" data-view-btn="family" href="#">가족 설정</a>
+          <a class="menu-item" data-view-btn="profile" href="#">내 프로필</a>
+        </nav>
+
+        <button id="seedBtn" class="btn primary add-item-btn" type="button">샘플 데이터 넣기</button>
+      </aside>
+
+      <div class="content-shell">
+        <header class="topbar card">
+          <div class="top-row">
+            <h1>우리 집 재고 관리</h1>
+            <p class="muted">사전 관리로 필요한 물건을 미리 준비하세요.</p>
+          </div>
+
+          <div class="top-actions">
+            <div class="field-inline">
+              <input id="quickSearch" type="text" placeholder="집에 있어? (품목명/바코드)" />
+              <button id="quickSearchBtn" class="btn primary" type="button">확인</button>
+            </div>
+            <div class="field-inline family-inline">
+              <input id="familyCode" type="text" maxlength="24" placeholder="가족코드" />
+              <button id="connectFamilyBtn" class="btn ghost" type="button">공유코드 연결</button>
+            </div>
+          </div>
+
+          <p id="quickResult" class="muted">품목명을 입력하면 현재 재고를 바로 보여줘요.</p>
+          <p id="syncStatus" class="muted">기본은 개인 모드입니다. 공유코드를 넣으면 가족 모드로 저장됩니다.</p>
+        </header>
+
+        <main class="dashboard-grid">
+          <section class="card stats-panel view-panel" data-view="dashboard">
+            <h2>대시보드 요약</h2>
+            <div class="stats-grid">
+              <article class="stat-box">
+                <p class="stat-label">등록 품목</p>
+                <p id="statTotalItems" class="stat-value">0</p>
+              </article>
+              <article class="stat-box warning">
+                <p class="stat-label">소진 임박</p>
+                <p id="statRiskCount" class="stat-value">0</p>
+              </article>
+              <article class="stat-box">
+                <p class="stat-label">자동 장보기</p>
+                <p id="statShoppingCount" class="stat-value">0</p>
+              </article>
+              <article class="stat-box accent">
+                <p class="stat-label">예상 구매비</p>
+                <p id="statEstimatedCost" class="stat-value">₩0</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="card recent-panel view-panel" data-view="dashboard">
+            <div class="row-between">
+              <h2>최근 사용 기록</h2>
+              <span class="chip">최신 5건</span>
+            </div>
+            <ul id="recentUsageList" class="recent-list"></ul>
+          </section>
+
+          <section class="card form-panel view-panel" data-view="inventory">
+            <h2>품목 등록</h2>
+            <form id="itemForm" class="item-form">
+              <label>
+                품목명
+                <input id="name" required maxlength="30" placeholder="예: 휴지" />
+              </label>
+              <label>
+                바코드 (선택)
+                <input id="barcode" maxlength="40" placeholder="스캔 시 자동 입력" />
+              </label>
+              <label>
+                단위
+                <select id="unit">
+                  <option value="roll">롤</option>
+                  <option value="count">개</option>
+                  <option value="percent">%</option>
+                </select>
+              </label>
+              <label>
+                현재 수량
+                <input id="quantity" type="number" min="0" step="1" required />
+              </label>
+              <label>
+                최소 보유 기준
+                <input id="threshold" type="number" min="0" step="1" value="2" required />
+              </label>
+              <label>
+                유통기한 (선택)
+                <input id="expiryDate" type="date" />
+              </label>
+              <button class="btn primary" type="submit">등록하기</button>
+            </form>
+          </section>
+
+          <section class="card sync-tools-panel view-panel" data-view="family">
+            <h2>가족 동기화 도구</h2>
+            <div class="sync-row">
+              <button id="exportDataBtn" class="btn ghost" type="button">공유 데이터 복사</button>
+              <button id="importDataBtn" class="btn ghost" type="button">붙여넣기 데이터 적용</button>
+            </div>
+            <textarea
+              id="syncPayload"
+              rows="4"
+              placeholder="가족에게 받은 데이터 문자열을 여기에 붙여넣으세요"
+            ></textarea>
+          </section>
+
+          <section class="card barcode-panel view-panel" data-view="inventory">
+            <h2>바코드 스캔</h2>
+            <div class="scan-actions">
+              <button id="startScanBtn" class="btn primary" type="button">스캔 시작</button>
+              <button id="stopScanBtn" class="btn ghost" type="button">스캔 중지</button>
+            </div>
+            <video id="scanVideo" playsinline muted></video>
+            <p id="scanResult" class="muted">카메라 접근 허용 후 바코드를 비춰주세요.</p>
+          </section>
+
+          <section class="card alert-panel view-panel" data-view="dashboard,inventory">
+            <h2>오늘의 알림</h2>
+            <ul id="alertList" class="alerts"></ul>
+          </section>
+
+          <section class="card inventory-panel view-panel" data-view="inventory,dashboard">
+            <div class="row-between">
+              <h2>재고 목록</h2>
+              <span class="chip">실시간 반영</span>
+            </div>
+            <div id="inventoryList" class="inventory-grid"></div>
+          </section>
+
+          <section class="card shopping-panel view-panel" data-view="shopping,dashboard">
+            <h2>장보기 리스트 (자동 생성)</h2>
+            <ul id="shoppingList" class="shopping-list"></ul>
+          </section>
+
+          <section class="card report-panel view-panel" data-view="report,dashboard">
+            <h2>월간 소비 리포트</h2>
+            <div id="report" class="report"></div>
+          </section>
+
+          <section class="card profile-panel view-panel" data-view="profile">
+            <h2>내 프로필</h2>
+            <div class="profile-editor">
+              <div class="avatar-wrap">
+                <img id="profileAvatarPreview" class="avatar-preview" alt="프로필 이미지" />
+              </div>
+              <div class="profile-form-grid">
+                <label>
+                  닉네임
+                  <input id="profileNicknameInput" type="text" maxlength="20" placeholder="닉네임 입력" />
+                </label>
+                <label>
+                  프로필 이미지
+                  <input id="profileAvatarInput" type="file" accept="image/*" />
+                </label>
+                <div class="profile-actions-row">
+                  <button id="profileSaveBtn" class="btn primary" type="button">프로필 저장</button>
+                  <button id="profileResetBtn" class="btn danger" type="button">로그아웃 + 데이터 초기화</button>
+                </div>
+              </div>
+            </div>
+            <div class="profile-grid">
+              <article class="profile-card">
+                <p class="muted">사용 모드</p>
+                <p class="profile-value" id="profileModeText">개인 모드</p>
+              </article>
+              <article class="profile-card">
+                <p class="muted">닉네임 / 등록 품목 수</p>
+                <p class="profile-value" id="profileItemCount">사용자 · 0개</p>
+              </article>
+              <article class="profile-card">
+                <p class="muted">동기화 상태</p>
+                <p class="profile-value" id="profileSyncState">대기 중</p>
+              </article>
+            </div>
+            <p class="muted">가족코드를 연결하면 여러 기기에서 동일한 재고를 관리할 수 있습니다.</p>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <template id="itemCardTemplate">
+      <article class="item-card">
+        <div class="item-head">
+          <h3 class="item-name"></h3>
+          <p class="item-unit muted"></p>
+        </div>
+        <p class="qty"></p>
+        <p class="forecast"></p>
+        <p class="expiry muted"></p>
+        <div class="item-actions">
+          <button class="btn small use-btn">사용 기록 +1</button>
+          <button class="btn small buy-btn">구매 +1</button>
+          <button class="btn small danger delete-btn">삭제</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
