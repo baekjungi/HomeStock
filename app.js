@@ -8,6 +8,13 @@ const BARCODE_BOOK = {
 };
 const VIEW_STORAGE_KEY = "homestock_view_v1";
 const PROFILE_STORAGE_KEY = "homestock_profile_v1";
+const USERS_STORAGE_KEY = "homestock_users_v1";
+const SESSION_STORAGE_KEY = "homestock_session_v1";
+const ITEM_TEMPLATES = {
+  tissue: { name: "휴지", unit: "roll", threshold: 3, quantity: 8 },
+  shampoo: { name: "샴푸", unit: "percent", threshold: 20, quantity: 70 },
+  detergent: { name: "세제", unit: "count", threshold: 1, quantity: 2 },
+};
 
 const els = {
   itemForm: document.getElementById("itemForm"),
@@ -19,6 +26,8 @@ const els = {
   syncStatus: document.getElementById("syncStatus"),
   quickSearch: document.getElementById("quickSearch"),
   quickSearchBtn: document.getElementById("quickSearchBtn"),
+  focusSearchBtn: document.getElementById("focusSearchBtn"),
+  jumpAddBtn: document.getElementById("jumpAddBtn"),
   quickResult: document.getElementById("quickResult"),
   startScanBtn: document.getElementById("startScanBtn"),
   stopScanBtn: document.getElementById("stopScanBtn"),
@@ -30,6 +39,11 @@ const els = {
   report: document.getElementById("report"),
   seedBtn: document.getElementById("seedBtn"),
   itemCardTemplate: document.getElementById("itemCardTemplate"),
+  inventoryFilterInput: document.getElementById("inventoryFilterInput"),
+  inventorySortSelect: document.getElementById("inventorySortSelect"),
+  lowStockOnly: document.getElementById("lowStockOnly"),
+  restoreDeletedBtn: document.getElementById("restoreDeletedBtn"),
+  templateItemBtns: document.querySelectorAll("[data-template-item]"),
   menuItems: document.querySelectorAll("[data-view-btn]"),
   viewPanels: document.querySelectorAll(".view-panel"),
   statTotalItems: document.getElementById("statTotalItems"),
@@ -37,6 +51,7 @@ const els = {
   statShoppingCount: document.getElementById("statShoppingCount"),
   statEstimatedCost: document.getElementById("statEstimatedCost"),
   recentUsageList: document.getElementById("recentUsageList"),
+  footerYear: document.getElementById("footerYear"),
   profileModeText: document.getElementById("profileModeText"),
   profileItemCount: document.getElementById("profileItemCount"),
   profileSyncState: document.getElementById("profileSyncState"),
@@ -45,6 +60,37 @@ const els = {
   profileAvatarPreview: document.getElementById("profileAvatarPreview"),
   profileSaveBtn: document.getElementById("profileSaveBtn"),
   profileResetBtn: document.getElementById("profileResetBtn"),
+  startGate: document.getElementById("startGate"),
+  startGateStatus: document.getElementById("startGateStatus"),
+  authStep: document.getElementById("authStep"),
+  roomStep: document.getElementById("roomStep"),
+  loginIdInput: document.getElementById("loginIdInput"),
+  loginPwInput: document.getElementById("loginPwInput"),
+  loginBtn: document.getElementById("loginBtn"),
+  signupBtn: document.getElementById("signupBtn"),
+  anonStartBtn: document.getElementById("anonStartBtn"),
+  realEmailInput: document.getElementById("realEmailInput"),
+  realPwInput: document.getElementById("realPwInput"),
+  realSignupBtn: document.getElementById("realSignupBtn"),
+  realLoginBtn: document.getElementById("realLoginBtn"),
+  googleLoginBtn: document.getElementById("googleLoginBtn"),
+  githubLoginBtn: document.getElementById("githubLoginBtn"),
+  facebookLoginBtn: document.getElementById("facebookLoginBtn"),
+  appleLoginBtn: document.getElementById("appleLoginBtn"),
+  microsoftLoginBtn: document.getElementById("microsoftLoginBtn"),
+  twitterLoginBtn: document.getElementById("twitterLoginBtn"),
+  yahooLoginBtn: document.getElementById("yahooLoginBtn"),
+  roomCodeInput: document.getElementById("roomCodeInput"),
+  createRoomBtn: document.getElementById("createRoomBtn"),
+  joinRoomBtn: document.getElementById("joinRoomBtn"),
+  soloStartBtn: document.getElementById("soloStartBtn"),
+  inventoryFormPanel: document.getElementById("inventoryFormPanel"),
+  aiLauncherBtn: document.getElementById("aiLauncherBtn"),
+  aiAssistantPanel: document.getElementById("aiAssistantPanel"),
+  aiCloseBtn: document.getElementById("aiCloseBtn"),
+  aiMessages: document.getElementById("aiMessages"),
+  aiInput: document.getElementById("aiInput"),
+  aiSendBtn: document.getElementById("aiSendBtn"),
 };
 
 let activeStorageKey = BASE_STORAGE_KEY;
@@ -55,6 +101,13 @@ let zxingReader = null;
 let nativeScanStartedAt = 0;
 let currentView = localStorage.getItem(VIEW_STORAGE_KEY) || "dashboard";
 let profileState = loadProfile();
+let inventoryViewState = {
+  query: "",
+  sort: "recent",
+  lowStockOnly: false,
+};
+let lastDeletedItem = null;
+let currentUser = loadSessionUser();
 const firebaseSync = {
   enabled: false,
   userId: null,
@@ -63,6 +116,214 @@ const firebaseSync = {
   writeTimer: null,
   applyingRemote: false,
 };
+
+function loadUsers() {
+  try {
+    const raw = localStorage.getItem(USERS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object") return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function saveUsers(users) {
+  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+}
+
+function loadSessionUser() {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed.id !== "string") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveSessionUser(user) {
+  if (!user) {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    currentUser = null;
+    return;
+  }
+  currentUser = user;
+  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(user));
+}
+
+function isFirebaseAuthAvailable() {
+  return Boolean(window.firebase && window.firebase.auth && window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey);
+}
+
+function isValidEmail(value) {
+  const email = String(value || "").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function ensureFirebaseInitialized() {
+  if (!window.firebase || !window.FIREBASE_CONFIG || !window.FIREBASE_CONFIG.apiKey) {
+    throw new Error("Firebase 설정이 없어 실계정 인증을 사용할 수 없습니다.");
+  }
+  if (!window.firebase.apps.length) {
+    window.firebase.initializeApp(window.FIREBASE_CONFIG);
+  }
+}
+
+function applyLoggedInUser(user, type, successText) {
+  const email = user && user.email ? user.email : `${type}-user`;
+  const displayName = user && user.displayName ? user.displayName : email.split("@")[0];
+  saveSessionUser({ id: email, type });
+  profileState.nickname = displayName || "사용자";
+  saveProfile();
+  showRoomStep();
+  setStartStatus(successText);
+}
+
+function isPopupIssue(code) {
+  const c = String(code || "");
+  return (
+    c.includes("popup-blocked") ||
+    c.includes("popup-closed-by-user") ||
+    c.includes("cancelled-popup-request") ||
+    c.includes("operation-not-supported-in-this-environment")
+  );
+}
+
+function extractFirebaseAuthDetail(error) {
+  const direct = String(error && error.message ? error.message : "");
+  const responseMessage = String(
+    error && error.customData && error.customData._tokenResponse && error.customData._tokenResponse.error
+      ? error.customData._tokenResponse.error.message
+      : ""
+  );
+  const serverMessage = String(
+    error && error.customData && error.customData._serverResponse && error.customData._serverResponse.error
+      ? error.customData._serverResponse.error.message
+      : ""
+  );
+
+  const merged = [responseMessage, serverMessage, direct]
+    .map((x) => String(x || "").trim())
+    .filter(Boolean)
+    .join(" | ");
+
+  return merged;
+}
+
+async function hydrateRedirectAuthResult() {
+  try {
+    if (!isFirebaseAuthAvailable()) return;
+    await ensureFirebaseInitialized();
+    const result = await window.firebase.auth().getRedirectResult();
+    const user = result && result.user ? result.user : null;
+    if (!user) return;
+    applyLoggedInUser(user, "redirect", "소셜 로그인 완료. 방을 선택하세요.");
+  } catch {
+    // noop
+  }
+}
+
+async function loginWithSocialProvider(providerName, providerFactory) {
+  try {
+    await ensureFirebaseInitialized();
+    const provider = providerFactory();
+    const auth = window.firebase.auth();
+
+    try {
+      const result = await auth.signInWithPopup(provider);
+      const user = result && result.user ? result.user : null;
+      applyLoggedInUser(user, providerName.toLowerCase(), `${providerName} 로그인 완료. 방을 선택하세요.`);
+      return;
+    } catch (popupError) {
+      const popupCode = String(popupError && popupError.code ? popupError.code : "");
+      if (isPopupIssue(popupCode)) {
+        setStartStatus(`${providerName} 팝업이 닫혀서 전체화면 로그인으로 전환합니다...`);
+        await auth.signInWithRedirect(provider);
+        return;
+      }
+      throw popupError;
+    }
+  } catch (error) {
+    const code = String(error && error.code ? error.code : "");
+    const detail = extractFirebaseAuthDetail(error);
+    let message = error && error.message ? error.message : "알 수 없는 오류";
+    if (code.includes("operation-not-allowed")) {
+      message = `${providerName} 로그인 설정이 꺼져 있어요. Firebase 콘솔에서 ${providerName} 공급자를 활성화해 주세요.`;
+    } else if (code.includes("unauthorized-domain")) {
+      message = `현재 도메인(${window.location.hostname})이 Firebase Authorized domains에 없어 로그인할 수 없어요. Firebase Authentication > Settings > Authorized domains에 이 도메인을 추가해 주세요.`;
+    } else if (code.includes("internal-error")) {
+      if (detail.includes("CONFIGURATION_NOT_FOUND") || detail.includes("INVALID_PROVIDER_ID")) {
+        message = `${providerName} 제공자 설정이 완성되지 않았어요. Firebase Authentication > Sign-in method에서 ${providerName}를 활성화하고, 프로젝트 지원 이메일을 저장해 주세요.`;
+      } else if (detail.includes("API_KEY") || detail.includes("API_KEY_SERVICE_BLOCKED")) {
+        message = `Firebase Web API 키 설정 문제예요. Firebase 프로젝트의 웹 앱 API 키가 유효한지 확인해 주세요.`;
+      } else {
+        message = `${providerName} 인증 내부 오류가 발생했어요. Firebase Authentication 설정(Provider/Authorized domains/지원 이메일)을 확인해 주세요.`;
+      }
+    } else if (code.includes("popup-blocked")) {
+      message = "팝업이 차단되었습니다. 브라우저 팝업 허용 후 다시 시도해 주세요.";
+    } else if (code.includes("cancelled-popup-request") || code.includes("popup-closed-by-user")) {
+      message = "로그인 창이 닫혀 취소되었습니다.";
+    }
+    const debugHint = detail ? ` (상세: ${detail})` : "";
+    setStartStatus(`${providerName} 로그인 실패: ${message}${debugHint}`);
+  }
+}
+
+function createRoomCode() {
+  return `room-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function setStartStatus(text) {
+  if (els.startGateStatus) {
+    els.startGateStatus.textContent = text;
+  }
+}
+
+function showRoomStep() {
+  if (els.authStep) els.authStep.classList.add("is-hidden");
+  if (els.roomStep) els.roomStep.classList.remove("is-hidden");
+  if (els.roomCodeInput && state.familyCode) {
+    els.roomCodeInput.value = state.familyCode;
+  }
+}
+
+function showAuthStep() {
+  if (els.authStep) els.authStep.classList.remove("is-hidden");
+  if (els.roomStep) els.roomStep.classList.add("is-hidden");
+}
+
+function finishStartFlow() {
+  if (els.startGate) {
+    els.startGate.classList.add("is-hidden");
+  }
+  if (currentUser && currentUser.id) {
+    profileState.nickname = currentUser.id;
+    saveProfile();
+  }
+  renderAll();
+}
+
+function initializeStartFlow() {
+  if (!els.startGate) {
+    renderAll();
+    return;
+  }
+
+  if (currentUser && currentUser.id) {
+    setStartStatus(`${currentUser.id}님, 방을 선택하세요.`);
+    showRoomStep();
+    if (state.familyCode) {
+      finishStartFlow();
+      return;
+    }
+    return;
+  }
+
+  setStartStatus("로그인 후 방을 선택하세요.");
+  showAuthStep();
+}
 
 function loadProfile() {
   try {
@@ -87,6 +348,12 @@ function sanitizeCode(value) {
     .toLowerCase()
     .replace(/[^a-z0-9_-]/g, "")
     .slice(0, 24);
+}
+
+function normalizeLoginId(value) {
+  return String(value || "")
+    .trim()
+    .slice(0, 40);
 }
 
 function getStorageKeyByCode(code) {
@@ -262,6 +529,15 @@ function getBuyStep(unit) {
   return 1;
 }
 
+function getTotalSpent(items) {
+  return items.reduce((sum, item) => {
+    const logs = Array.isArray(item.purchaseLogs) ? item.purchaseLogs : [];
+    const unitPrice = getUnitEstimatedPrice(item.unit);
+    const itemTotal = logs.reduce((acc, log) => acc + Number(log.amount || 0) * unitPrice, 0);
+    return sum + itemTotal;
+  }, 0);
+}
+
 function getDailyUsage(item) {
   const logs = (item.usageLogs || []).slice(-10);
   if (logs.length < 2) return null;
@@ -290,6 +566,46 @@ function getExpiryInfo(item) {
   if (!item.expiryDate) return null;
   const diff = Math.ceil((new Date(item.expiryDate) - new Date()) / DAY_MS);
   return { daysLeft: diff };
+}
+
+function isLowStockItem(item) {
+  const dep = getDepletionInfo(item);
+  return item.quantity <= item.threshold || (dep && dep.daysLeft <= 7);
+}
+
+function getInventoryItemsForView() {
+  const query = inventoryViewState.query.trim().toLowerCase();
+  let items = state.items.filter((item) => {
+    if (!query) return true;
+    return (
+      String(item.name || "")
+        .toLowerCase()
+        .includes(query) || String(item.barcode || "").includes(query)
+    );
+  });
+
+  if (inventoryViewState.lowStockOnly) {
+    items = items.filter((item) => isLowStockItem(item));
+  }
+
+  const sorted = [...items];
+  if (inventoryViewState.sort === "name_asc") {
+    sorted.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ko"));
+  } else if (inventoryViewState.sort === "qty_asc") {
+    sorted.sort((a, b) => Number(a.quantity || 0) - Number(b.quantity || 0));
+  } else if (inventoryViewState.sort === "qty_desc") {
+    sorted.sort((a, b) => Number(b.quantity || 0) - Number(a.quantity || 0));
+  } else if (inventoryViewState.sort === "expiry_soon") {
+    sorted.sort((a, b) => {
+      const aDays = a.expiryDate ? Math.ceil((new Date(a.expiryDate) - new Date()) / DAY_MS) : Number.MAX_SAFE_INTEGER;
+      const bDays = b.expiryDate ? Math.ceil((new Date(b.expiryDate) - new Date()) / DAY_MS) : Number.MAX_SAFE_INTEGER;
+      return aDays - bDays;
+    });
+  } else {
+    sorted.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }
+
+  return sorted;
 }
 
 function getAlerts(items) {
@@ -437,16 +753,12 @@ function renderDashboardSummary() {
 
   const alerts = getAlerts(state.items);
   const shoppingTargets = buildShoppingTargets(state.items);
-  const estimatedCost = shoppingTargets.reduce((sum, item) => {
-    const recommended = Math.max(item.threshold * 2 - Number(item.quantity || 0), getBuyStep(item.unit));
-    const amount = Math.max(recommended, 0);
-    return sum + amount * getUnitEstimatedPrice(item.unit);
-  }, 0);
+  const totalSpent = getTotalSpent(state.items);
 
   els.statTotalItems.textContent = String(state.items.length);
   els.statRiskCount.textContent = String(alerts.length);
   els.statShoppingCount.textContent = String(shoppingTargets.length);
-  els.statEstimatedCost.textContent = `₩${Math.round(estimatedCost).toLocaleString("ko-KR")}`;
+  els.statEstimatedCost.textContent = `₩${Math.round(totalSpent).toLocaleString("ko-KR")}`;
 
   if (!els.recentUsageList) return;
 
@@ -541,16 +853,26 @@ async function resetAllAppData() {
   }
 
   await initFirebaseSync();
+  saveSessionUser(null);
+  setStartStatus("로그인 후 방을 선택하세요.");
+  showAuthStep();
+  if (els.startGate) {
+    els.startGate.classList.remove("is-hidden");
+  }
 }
 
 function renderInventory() {
   els.inventoryList.innerHTML = "";
-  if (!state.items.length) {
-    els.inventoryList.innerHTML = "<p class='muted'>등록된 품목이 없습니다. 첫 품목을 추가해보세요.</p>";
+  const list = getInventoryItemsForView();
+  if (!list.length) {
+    const emptyText = state.items.length
+      ? "조건에 맞는 품목이 없어요. 검색어나 필터를 바꿔보세요."
+      : "등록된 품목이 없습니다. 첫 품목을 추가해보세요.";
+    els.inventoryList.innerHTML = `<p class='muted'>${emptyText}</p>`;
     return;
   }
 
-  state.items.forEach((item) => {
+  list.forEach((item) => {
     const card = els.itemCardTemplate.content.cloneNode(true);
     card.querySelector(".item-name").textContent = item.name;
     card.querySelector(".item-unit").textContent = `단위: ${unitLabel(item.unit)}`;
@@ -590,13 +912,85 @@ function renderInventory() {
     });
 
     card.querySelector(".delete-btn").addEventListener("click", () => {
+      lastDeletedItem = { ...item };
       state.items = state.items.filter((x) => x.id !== item.id);
       saveState();
       renderAll();
+      els.quickResult.textContent = `${item.name} 항목을 삭제했어요. 필요하면 복구 버튼을 눌러주세요.`;
     });
 
     els.inventoryList.appendChild(card);
   });
+}
+
+function applyItemTemplate(templateKey) {
+  const template = ITEM_TEMPLATES[templateKey];
+  if (!template) return;
+  document.getElementById("name").value = template.name;
+  document.getElementById("unit").value = template.unit;
+  document.getElementById("threshold").value = String(template.threshold);
+  document.getElementById("quantity").value = String(template.quantity);
+  els.quickResult.textContent = `${template.name} 템플릿을 채웠어요. 필요한 값만 바꾼 뒤 등록하세요.`;
+}
+
+function restoreLastDeletedItem() {
+  if (!lastDeletedItem) {
+    els.quickResult.textContent = "복구할 최근 삭제 항목이 없어요.";
+    return;
+  }
+
+  const exists = state.items.some((item) => item.id === lastDeletedItem.id || item.name === lastDeletedItem.name);
+  if (exists) {
+    els.quickResult.textContent = "같은 항목이 이미 있어 복구를 건너뛰었어요.";
+    lastDeletedItem = null;
+    renderAll();
+    return;
+  }
+
+  state.items.push({ ...lastDeletedItem, id: crypto.randomUUID() });
+  const restoredName = lastDeletedItem.name;
+  lastDeletedItem = null;
+  saveState();
+  renderAll();
+  els.quickResult.textContent = `${restoredName} 항목을 복구했어요.`;
+}
+
+function bindInventoryToolbar() {
+  if (els.inventoryFilterInput) {
+    els.inventoryFilterInput.addEventListener("input", (e) => {
+      inventoryViewState.query = String(e.target.value || "");
+      renderInventory();
+    });
+  }
+
+  if (els.inventorySortSelect) {
+    els.inventorySortSelect.addEventListener("change", (e) => {
+      inventoryViewState.sort = String(e.target.value || "recent");
+      renderInventory();
+    });
+  }
+
+  if (els.lowStockOnly) {
+    els.lowStockOnly.addEventListener("change", (e) => {
+      inventoryViewState.lowStockOnly = Boolean(e.target.checked);
+      renderInventory();
+    });
+  }
+}
+
+function syncInventoryToolbarState() {
+  if (els.inventoryFilterInput && els.inventoryFilterInput.value !== inventoryViewState.query) {
+    els.inventoryFilterInput.value = inventoryViewState.query;
+  }
+  if (els.inventorySortSelect && els.inventorySortSelect.value !== inventoryViewState.sort) {
+    els.inventorySortSelect.value = inventoryViewState.sort;
+  }
+  if (els.lowStockOnly && els.lowStockOnly.checked !== inventoryViewState.lowStockOnly) {
+    els.lowStockOnly.checked = inventoryViewState.lowStockOnly;
+  }
+  if (els.restoreDeletedBtn) {
+    els.restoreDeletedBtn.disabled = !lastDeletedItem;
+  }
 }
 
 function renderAll() {
@@ -604,6 +998,7 @@ function renderAll() {
   els.syncStatus.textContent = `${modeText}로 저장 중입니다.`;
   renderAlerts();
   renderInventory();
+  syncInventoryToolbarState();
   renderShoppingList();
   renderReport();
   renderDashboardSummary();
@@ -624,6 +1019,178 @@ function setView(view) {
     const views = (panel.dataset.view || "").split(",").map((x) => x.trim());
     panel.classList.toggle("is-hidden", !views.includes(nextView));
   });
+
+  if (window.matchMedia("(max-width: 860px)").matches) {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+}
+
+function setAiPanelOpen(open) {
+  if (!els.aiAssistantPanel || !els.aiLauncherBtn) return;
+  els.aiAssistantPanel.classList.toggle("is-open", open);
+  els.aiAssistantPanel.setAttribute("aria-hidden", open ? "false" : "true");
+  els.aiLauncherBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function pushAiMessage(role, text) {
+  if (!els.aiMessages) return;
+  const div = document.createElement("div");
+  div.className = `ai-msg ${role}`;
+  div.textContent = text;
+  els.aiMessages.appendChild(div);
+  els.aiMessages.scrollTop = els.aiMessages.scrollHeight;
+}
+
+function summarizeInventoryForAi() {
+  const items = Array.isArray(state.items) ? state.items : [];
+  const lowStockItems = items.filter((item) => isLowStockItem(item)).slice(0, 8);
+  const expiringSoonItems = items
+    .filter((item) => {
+      if (!item.expiryDate) return false;
+      const days = Math.ceil((new Date(item.expiryDate) - new Date()) / DAY_MS);
+      return days <= 14;
+    })
+    .slice(0, 8);
+
+  return {
+    familyMode: Boolean(state.familyCode),
+    familyCode: state.familyCode || "",
+    totalItems: items.length,
+    shoppingTargets: buildShoppingTargets(items).map((x) => ({
+      name: x.name,
+      quantity: Number(x.quantity || 0),
+      threshold: Number(x.threshold || 0),
+      unit: x.unit,
+    })),
+    lowStockItems: lowStockItems.map((x) => ({
+      name: x.name,
+      quantity: Number(x.quantity || 0),
+      threshold: Number(x.threshold || 0),
+      unit: x.unit,
+    })),
+    expiringSoonItems: expiringSoonItems.map((x) => ({
+      name: x.name,
+      expiryDate: x.expiryDate,
+      quantity: Number(x.quantity || 0),
+      unit: x.unit,
+    })),
+  };
+}
+
+function normalizeUnitForState(unit) {
+  const value = String(unit || "count").toLowerCase();
+  if (value === "roll") return "roll";
+  if (value === "percent") return "percent";
+  return "count";
+}
+
+function applyAiAction(action) {
+  if (!action || action.type !== "add_item" || !action.item) return "";
+
+  const incomingName = String(action.item.name || "").trim();
+  const incomingQty = Number(action.item.quantity || 0);
+  if (!incomingName || !incomingQty || incomingQty <= 0) {
+    return "AI 추가 요청을 해석하지 못해 저장하지 않았어요.";
+  }
+
+  const unit = normalizeUnitForState(action.item.unit);
+  const threshold = Number(action.item.threshold || (unit === "percent" ? 20 : unit === "roll" ? 2 : 1));
+  const barcode = String(action.item.barcode || "").trim();
+  const expiryDate = action.item.expiryDate ? String(action.item.expiryDate) : null;
+
+  const existing = state.items.find((item) => String(item.name || "").toLowerCase() === incomingName.toLowerCase());
+  if (existing) {
+    existing.quantity = Number(existing.quantity || 0) + incomingQty;
+    existing.unit = unit;
+    existing.threshold = threshold;
+    if (barcode) {
+      existing.barcode = barcode;
+    }
+    if (expiryDate) {
+      existing.expiryDate = expiryDate;
+    }
+    existing.purchaseLogs = Array.isArray(existing.purchaseLogs) ? existing.purchaseLogs : [];
+    existing.purchaseLogs.push({ at: new Date().toISOString(), amount: incomingQty });
+    saveState();
+    renderAll();
+    const unitLabelText = unit === "roll" ? "롤" : unit === "percent" ? "%" : "개";
+    return `AI가 기존 품목 ${incomingName}에 ${incomingQty}${unitLabelText}를 추가했어요.`;
+  }
+
+  state.items.push({
+    id: crypto.randomUUID(),
+    name: incomingName,
+    barcode,
+    unit,
+    quantity: incomingQty,
+    threshold,
+    expiryDate,
+    usageLogs: [],
+    purchaseLogs: [{ at: new Date().toISOString(), amount: incomingQty }],
+    createdAt: new Date().toISOString(),
+  });
+
+  saveState();
+  renderAll();
+  const unitLabelText = unit === "roll" ? "롤" : unit === "percent" ? "%" : "개";
+  return `AI가 ${incomingName} ${incomingQty}${unitLabelText}를 재고에 등록했어요.`;
+}
+
+async function askInventoryAi(prefilledPrompt) {
+  if (!els.aiInput) return;
+  const question = String(prefilledPrompt || els.aiInput.value || "").trim();
+  if (!question) {
+    pushAiMessage("system", "질문을 입력해 주세요.");
+    return;
+  }
+
+  setAiPanelOpen(true);
+  pushAiMessage("user", question);
+  if (!prefilledPrompt) {
+    els.aiInput.value = "";
+  }
+
+  if (els.aiSendBtn) {
+    els.aiSendBtn.disabled = true;
+  }
+
+  try {
+    const response = await fetch("/api/ai-chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message: question,
+        inventoryContext: summarizeInventoryForAi(),
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      const errorText = data && data.error ? data.error : "AI 응답에 실패했어요.";
+      pushAiMessage("system", `오류: ${errorText}`);
+      return;
+    }
+
+    const answer = data && data.text ? String(data.text).trim() : "답변이 비어 있어요.";
+    if (data && data.action) {
+      const actionResultText = applyAiAction(data.action);
+      if (actionResultText) {
+        pushAiMessage("system", actionResultText);
+      }
+    }
+    pushAiMessage("assistant", answer);
+  } catch {
+    pushAiMessage(
+      "system",
+      "AI 서버에 연결할 수 없어요. Node 서버를 켜고, Azure 환경변수 설정을 확인해 주세요."
+    );
+  } finally {
+    if (els.aiSendBtn) {
+      els.aiSendBtn.disabled = false;
+    }
+  }
 }
 
 async function copyText(text) {
@@ -1032,6 +1599,255 @@ if (els.profileResetBtn) {
   });
 }
 
+if (els.focusSearchBtn) {
+  els.focusSearchBtn.addEventListener("click", () => {
+    setView("dashboard");
+    if (els.quickSearch) {
+      els.quickSearch.focus();
+      els.quickSearch.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
+}
+
+if (els.jumpAddBtn) {
+  els.jumpAddBtn.addEventListener("click", () => {
+    setView("inventory");
+    if (els.inventoryFormPanel) {
+      els.inventoryFormPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    const nameInput = document.getElementById("name");
+    if (nameInput) {
+      nameInput.focus();
+    }
+  });
+}
+
+if (els.aiLauncherBtn) {
+  els.aiLauncherBtn.addEventListener("click", () => {
+    const isOpen = Boolean(els.aiAssistantPanel && els.aiAssistantPanel.classList.contains("is-open"));
+    setAiPanelOpen(!isOpen);
+    if (!isOpen && els.aiMessages && !els.aiMessages.childElementCount) {
+      pushAiMessage("system", "안녕하세요. 재고 상황을 분석해 필요한 구매/소비 우선순위를 도와드릴게요.");
+    }
+  });
+}
+
+if (els.aiCloseBtn) {
+  els.aiCloseBtn.addEventListener("click", () => {
+    setAiPanelOpen(false);
+  });
+}
+
+if (els.aiSendBtn) {
+  els.aiSendBtn.addEventListener("click", async () => {
+    await askInventoryAi();
+  });
+}
+
+if (els.aiInput) {
+  els.aiInput.addEventListener("keydown", async (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      await askInventoryAi();
+    }
+  });
+}
+
+if (els.signupBtn) {
+  els.signupBtn.addEventListener("click", () => {
+    const id = normalizeLoginId(els.loginIdInput ? els.loginIdInput.value : "");
+    const pw = String(els.loginPwInput ? els.loginPwInput.value : "").trim();
+    if (!id || !pw) {
+      setStartStatus("아이디와 비밀번호를 입력해 주세요.");
+      return;
+    }
+
+    const users = loadUsers();
+    if (users[id]) {
+      setStartStatus("이미 있는 아이디입니다. 로그인해 주세요.");
+      return;
+    }
+
+    users[id] = { password: pw, createdAt: Date.now() };
+    saveUsers(users);
+    setStartStatus("회원가입 완료. 로그인 버튼을 눌러 시작하세요.");
+  });
+}
+
+if (els.loginBtn) {
+  els.loginBtn.addEventListener("click", () => {
+    const id = normalizeLoginId(els.loginIdInput ? els.loginIdInput.value : "");
+    const pw = String(els.loginPwInput ? els.loginPwInput.value : "").trim();
+    if (!id || !pw) {
+      setStartStatus("아이디와 비밀번호를 입력해 주세요.");
+      return;
+    }
+
+    const users = loadUsers();
+    if (!users[id]) {
+      users[id] = { password: pw, createdAt: Date.now() };
+      saveUsers(users);
+    } else if (users[id].password !== pw) {
+      setStartStatus("로그인 실패: 비밀번호를 확인해 주세요.");
+      return;
+    }
+
+    saveSessionUser({ id });
+    profileState.nickname = id;
+    saveProfile();
+    showRoomStep();
+    setStartStatus(`${id}님, 방을 선택하세요.`);
+  });
+}
+
+if (els.anonStartBtn) {
+  els.anonStartBtn.addEventListener("click", async () => {
+    try {
+      if (isFirebaseAuthAvailable()) {
+        await ensureFirebaseInitialized();
+        await window.firebase.auth().signInAnonymously();
+      }
+      const anonId = `guest-${Math.random().toString(36).slice(2, 6)}`;
+      saveSessionUser({ id: anonId, type: "anonymous" });
+      profileState.nickname = anonId;
+      saveProfile();
+      showRoomStep();
+      setStartStatus("익명 로그인 완료. 방을 선택하세요.");
+    } catch (error) {
+      setStartStatus(`익명 로그인 실패: ${error.message}`);
+    }
+  });
+}
+
+if (els.realSignupBtn) {
+  els.realSignupBtn.addEventListener("click", async () => {
+    const email = String(els.realEmailInput ? els.realEmailInput.value : "").trim();
+    const pw = String(els.realPwInput ? els.realPwInput.value : "").trim();
+    if (!isValidEmail(email)) {
+      setStartStatus("유효한 이메일을 입력해 주세요.");
+      return;
+    }
+    if (pw.length < 6) {
+      setStartStatus("비밀번호는 6자 이상이어야 합니다.");
+      return;
+    }
+
+    try {
+      await ensureFirebaseInitialized();
+      await window.firebase.auth().createUserWithEmailAndPassword(email, pw);
+      saveSessionUser({ id: email, type: "firebase" });
+      profileState.nickname = email.split("@")[0] || email;
+      saveProfile();
+      showRoomStep();
+      setStartStatus("실계정 회원가입 완료. 방을 선택하세요.");
+    } catch (error) {
+      setStartStatus(`실계정 회원가입 실패: ${error.message}`);
+    }
+  });
+}
+
+if (els.realLoginBtn) {
+  els.realLoginBtn.addEventListener("click", async () => {
+    const email = String(els.realEmailInput ? els.realEmailInput.value : "").trim();
+    const pw = String(els.realPwInput ? els.realPwInput.value : "").trim();
+    if (!isValidEmail(email)) {
+      setStartStatus("유효한 이메일을 입력해 주세요.");
+      return;
+    }
+    if (!pw) {
+      setStartStatus("비밀번호를 입력해 주세요.");
+      return;
+    }
+
+    try {
+      await ensureFirebaseInitialized();
+      await window.firebase.auth().signInWithEmailAndPassword(email, pw);
+      saveSessionUser({ id: email, type: "firebase" });
+      profileState.nickname = email.split("@")[0] || email;
+      saveProfile();
+      showRoomStep();
+      setStartStatus("실계정 로그인 완료. 방을 선택하세요.");
+    } catch (error) {
+      setStartStatus(`실계정 로그인 실패: ${error.message}`);
+    }
+  });
+}
+
+if (els.googleLoginBtn) {
+  els.googleLoginBtn.addEventListener("click", async () => {
+    await loginWithSocialProvider("Google", () => new window.firebase.auth.GoogleAuthProvider());
+  });
+}
+
+if (els.githubLoginBtn) {
+  els.githubLoginBtn.addEventListener("click", async () => {
+    await loginWithSocialProvider("GitHub", () => new window.firebase.auth.GithubAuthProvider());
+  });
+}
+
+if (els.facebookLoginBtn) {
+  els.facebookLoginBtn.addEventListener("click", async () => {
+    await loginWithSocialProvider("Facebook", () => new window.firebase.auth.FacebookAuthProvider());
+  });
+}
+
+if (els.appleLoginBtn) {
+  els.appleLoginBtn.addEventListener("click", async () => {
+    await loginWithSocialProvider("Apple", () => new window.firebase.auth.OAuthProvider("apple.com"));
+  });
+}
+
+if (els.microsoftLoginBtn) {
+  els.microsoftLoginBtn.addEventListener("click", async () => {
+    await loginWithSocialProvider("Microsoft", () => new window.firebase.auth.OAuthProvider("microsoft.com"));
+  });
+}
+
+if (els.twitterLoginBtn) {
+  els.twitterLoginBtn.addEventListener("click", async () => {
+    await loginWithSocialProvider("Twitter", () => new window.firebase.auth.TwitterAuthProvider());
+  });
+}
+
+if (els.yahooLoginBtn) {
+  els.yahooLoginBtn.addEventListener("click", async () => {
+    await loginWithSocialProvider("Yahoo", () => new window.firebase.auth.OAuthProvider("yahoo.com"));
+  });
+}
+
+if (els.createRoomBtn) {
+  els.createRoomBtn.addEventListener("click", () => {
+    const roomCode = createRoomCode();
+    if (els.roomCodeInput) {
+      els.roomCodeInput.value = roomCode;
+    }
+    applyFamilyMode(roomCode);
+    setStartStatus(`새 방 생성 완료: ${roomCode}`);
+    finishStartFlow();
+  });
+}
+
+if (els.joinRoomBtn) {
+  els.joinRoomBtn.addEventListener("click", () => {
+    const code = sanitizeCode(els.roomCodeInput ? els.roomCodeInput.value : "");
+    if (!code) {
+      setStartStatus("방 코드를 입력해 주세요.");
+      return;
+    }
+    applyFamilyMode(code);
+    setStartStatus(`방 입장 완료: ${code}`);
+    finishStartFlow();
+  });
+}
+
+if (els.soloStartBtn) {
+  els.soloStartBtn.addEventListener("click", () => {
+    applyFamilyMode("");
+    setStartStatus("개인 모드로 시작합니다.");
+    finishStartFlow();
+  });
+}
+
 els.menuItems.forEach((item) => {
   item.addEventListener("click", (e) => {
     e.preventDefault();
@@ -1039,8 +1855,65 @@ els.menuItems.forEach((item) => {
   });
 });
 
+document.addEventListener("click", (e) => {
+  const target = e.target instanceof Element ? e.target : null;
+  if (!target) return;
+
+  const templateBtn = target.closest("[data-template-item]");
+  if (templateBtn) {
+    e.preventDefault();
+    applyItemTemplate(templateBtn.dataset.templateItem);
+    return;
+  }
+
+  const restoreBtn = target.closest("#restoreDeletedBtn");
+  if (restoreBtn) {
+    e.preventDefault();
+    restoreLastDeletedItem();
+    return;
+  }
+
+  const aiPromptBtn = target.closest("[data-ai-prompt]");
+  if (aiPromptBtn) {
+    e.preventDefault();
+    const prompt = String(aiPromptBtn.getAttribute("data-ai-prompt") || "").trim();
+    if (prompt) {
+      askInventoryAi(prompt);
+    }
+  }
+});
+
+document.addEventListener("input", (e) => {
+  const target = e.target;
+  if (!(target instanceof HTMLInputElement)) return;
+  if (target.id !== "inventoryFilterInput") return;
+  inventoryViewState.query = String(target.value || "");
+  renderInventory();
+});
+
+document.addEventListener("change", (e) => {
+  const target = e.target;
+  if (target instanceof HTMLSelectElement && target.id === "inventorySortSelect") {
+    inventoryViewState.sort = String(target.value || "recent");
+    renderInventory();
+    return;
+  }
+
+  if (target instanceof HTMLInputElement && target.id === "lowStockOnly") {
+    inventoryViewState.lowStockOnly = Boolean(target.checked);
+    renderInventory();
+  }
+});
+
+bindInventoryToolbar();
 renderAll();
 setView(currentView);
 initFirebaseSync();
+initializeStartFlow();
+hydrateRedirectAuthResult();
+
+if (els.footerYear) {
+  els.footerYear.textContent = String(new Date().getFullYear());
+}
 
 window.addEventListener("beforeunload", stopScanner);

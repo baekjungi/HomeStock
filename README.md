@@ -2,8 +2,17 @@
 집에 있는 생필품을 똑똑하게 관리하는 생활용품 재고 관리 서비스를 만드는 프로젝트입니다.
 
 ## 실행 방법
-1. 같은 폴더의 `index.html` 파일을 브라우저에서 열면 바로 실행됩니다.
-2. 별도 서버나 설치 없이 동작합니다.
+1. Node.js 20+ 설치
+2. 의존성 설치
+	- `npm install`
+3. 서버 실행
+	- `npm start`
+4. 브라우저에서 접속
+	- `http://localhost:5501`
+
+참고:
+- 기본 화면만 볼 때는 `index.html` 직접 실행도 가능하지만,
+- AI 기능은 반드시 `npm start`로 서버를 켜야 동작합니다.
 
 ## 현재 구현된 MVP 기능
 - 생필품 등록(품목명, 단위, 수량, 최소 보유 기준, 유통기한)
@@ -63,3 +72,18 @@ service cloud.firestore {
 ## 데이터 저장
 - 브라우저 `localStorage`에 저장됩니다.
 - 브라우저 데이터를 지우면 기록이 초기화됩니다.
+
+## Azure AI 연동 설정
+HomeStock AI 도우미는 API 키를 브라우저에 노출하지 않기 위해 서버 프록시(`/api/ai-chat`)로 동작합니다.
+
+1. `.env.example` 파일을 참고해 `.env` 파일 생성
+2. 아래 값 채우기
+	- `AZURE_OPENAI_ENDPOINT`
+	- `AZURE_OPENAI_DEPLOYMENT`
+	- `AZURE_OPENAI_API_KEY`
+	- `AZURE_OPENAI_API_VERSION` (기본값: `2024-10-21`)
+3. `npm start`로 서버 재시작
+
+보안 주의:
+- `firebase-config.js` 같은 클라이언트 파일에 Azure API 키를 직접 넣지 마세요.
+- 키는 서버 환경변수로만 관리하세요.
