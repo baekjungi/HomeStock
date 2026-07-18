@@ -85,32 +85,6 @@ https://homestock61555.azurewebsites.net
 
 ---
 
-## 보안에서 신경 쓴 점
-
-- API 키는 서버 환경변수(.env/App Settings)에만 보관
-- 보안 헤더(CSP, X-Frame-Options, X-Content-Type-Options 등) 적용
-- 민감 파일 경로 차단(`/.env`, `/.git` 등)
-- AI API 요청 속도 제한(Rate limit)
-- 클라이언트에 키 노출 없이 서버 프록시 방식 유지
-
----
-
-## 실행 방법
-
-1. Node.js 20+ 설치
-2. 의존성 설치
-   - `npm install`
-3. `.env.example` 참고해서 `.env` 생성 후 값 입력
-   - `AZURE_OPENAI_ENDPOINT`
-   - `AZURE_OPENAI_DEPLOYMENT`
-   - `AZURE_OPENAI_API_KEY`
-   - `AZURE_OPENAI_API_VERSION` (기본값: `2024-10-21`)
-4. 서버 실행
-   - `npm start`
-5. 브라우저 접속
-   - `http://localhost:5501`
-
----
 
 ## 현재 진행 상태
 
